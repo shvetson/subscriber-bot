@@ -1,0 +1,26 @@
+ktor:
+  application:
+    modules:
+      - ru.shvets.subscriber.bot.app.ktor.ApplicationKt.module
+  deployment:
+    port: 8080
+  urls:
+    - "http://127.0.0.1:8080/"
+    - "http://0.0.0.0:8080/"
+    - "http://192.168.0.182:8080/"
+  watch:
+    - classes
+    - resources
+psql:
+  password: "$PSQL_PASSWORD"
+  schema: tgbots
+  driver: "org.postgresql.Driver"
+  url: "jdbc:postgresql://localhost:5432/tgbots"
+  user: "$PSQL_USER"
+telegram:
+  name: "$BOT_NAME"
+  token: "$BOT_TOKEN"
+  owner: "$BOT_OWNER"
+  private: "$PRIVATE_CHANNEL"
+scheduler:
+  minutes: 5

@@ -1,0 +1,1 @@
+package ru.shvets.subscriber.bot.repo.postgresql
