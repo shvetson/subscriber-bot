@@ -53,6 +53,7 @@ class BotService(appSettings: AppSettings) : TelegramLongPollingBot(), Logger {
     init {
         configureMenu()
 
+// TODO включить таймер с проверкой 1 раз в день
 //        val timer: Timer = Timer()
 //        timer.schedule(object : TimerTask() {
 //            override fun run() {
@@ -74,9 +75,9 @@ class BotService(appSettings: AppSettings) : TelegramLongPollingBot(), Logger {
             val patternClear: Pattern = Pattern.compile("^clear-expired$")
             val patternGiveRights: Pattern = Pattern.compile("^give-rights\\s(\\d*)$")
 
-            val matcherTimeCommand: Matcher = patternTimeCommand.matcher(text)
-            val matcherClear = patternClear.matcher(text)
-            val matcherGiveRights = patternGiveRights.matcher(text)
+            val matcherTimeCommand: Matcher = patternTimeCommand.matcher(text.lowercase())
+            val matcherClear = patternClear.matcher(text.lowercase())
+            val matcherGiveRights = patternGiveRights.matcher(text.lowercase())
 
             if (matcherTimeCommand.find()) {
                 sendInfoSupport(
@@ -85,40 +86,32 @@ class BotService(appSettings: AppSettings) : TelegramLongPollingBot(), Logger {
                             "\nName: ${update.message.from.firstName} ${update.message.from.lastName}" +
                             "\nChat ID: [${chatId}](${chatId})"
                 )
-
-                val messageSuccess = SendMessage()
-                messageSuccess.text = "Ваши данные получены, идет проверка."
-                messageSuccess.chatId = chatId.toString()
-                execute(messageSuccess)
-
+                sendMessage(chatId = chatId.toString(), message = "Ваши данные получены, идет проверка")
             } else if (matcherClear.find() && isAdmin(chatId.toString())) {
                 clearExpired()
             } else if (matcherGiveRights.find() && isAdmin(chatId.toString())) {
                 giveRights(matcherGiveRights.group(1))
             } else {
-                val message = getCommandResponse(
-                    text,
-                    update.message.from,
-                    chatId.toString()
-                )
-
-                message.enableHtml(true)
-                message.parseMode = ParseMode.MARKDOWN
-                message.chatId = chatId.toString()
+                val message = getCommandResponse(text, update.message.from, chatId.toString())
+                message.apply {
+                    this.chatId = chatId.toString()
+                    enableHtml(true)
+                    parseMode = ParseMode.MARKDOWN
+                }
                 execute(message)
             }
-
         } else if (update?.hasCallbackQuery() == true) {
-
+            // TODO необходим рефакторинг
             val message = getCommandResponse(
                 update.callbackQuery.data,
                 update.callbackQuery.from,
                 update.callbackQuery.message.chat.id.toString()
             )
-
-            message.enableHtml(true)
-            message.parseMode = ParseMode.MARKDOWN
-            message.chatId = update.callbackQuery.message.chat.id.toString()
+            message.apply {
+                this.chatId = update.callbackQuery.message.chat.id.toString()
+                enableHtml(true)
+                parseMode = ParseMode.MARKDOWN
+            }
             execute(message)
         }
     }
@@ -188,7 +181,8 @@ class BotService(appSettings: AppSettings) : TelegramLongPollingBot(), Logger {
 
     private fun handleAccessCommand(): SendMessage {
         return SendMessage().apply {
-            text = "Чтобы получить полный доступ, Вам надо сказать волшебное слово"
+            text =
+                "Чтобы получить полный доступ, вам надо сказать волшебное слово. Отправьте следующий текст: 'message please'"
             replyMarkup = getKeyBoard()
         }
     }
@@ -218,8 +212,8 @@ class BotService(appSettings: AppSettings) : TelegramLongPollingBot(), Logger {
             login = username ?: "",
             telegramId = TelegramId(chatId),
             startSubscribeAt = Clock.System.now(),
-            endSubscribeAt = if (typeSubscribe == TypeSubscribe.DEMO) Clock.System.now()
-                .plus(3.days) else Clock.System.now().plus(30.days),
+            endSubscribeAt = if (typeSubscribe == TypeSubscribe.DEMO) Clock.System.now().plus(3.days)
+            else Clock.System.now().plus(30.days),
             typeSubscribe = typeSubscribe,
         )
         return runBlocking { subscriberService.create(subscriber) }
@@ -231,18 +225,18 @@ class BotService(appSettings: AppSettings) : TelegramLongPollingBot(), Logger {
         return result != null
     }
 
+    // информирование администратора о желании пользователя получить полный доступ к каналу
     private fun sendInfoSupport(message: String) {
-        val messageSupport = SendMessage()
-        messageSupport.text = message
-        messageSupport.chatId = botOwner.toString()
-        execute(messageSupport)
+        sendMessage(botOwner.toString(), message)
     }
 
+    // проверка является ли пользователь владельцем канала
     private fun isAdmin(chatId: String): Boolean {
         return chatId.toLong() == botOwner
     }
 
     private fun clearExpired() {
+        //TODO проверку на дату, если меньше текущей даты, то включаем в список на исключение
         val subscribers: List<Subscriber> = runBlocking { subscriberService.search() }
         val successDeleted: MutableList<Subscriber> = ArrayList()
 
@@ -255,21 +249,15 @@ class BotService(appSettings: AppSettings) : TelegramLongPollingBot(), Logger {
 
             disableSubscriber(subscriber.telegramId.asString())
 
-            val message = SendMessage()
-            message.text = "Ваш доступ к каналу окончен"
-            message.chatId = subscriber.telegramId.asString()
-            execute(message)
-
+            sendMessage(subscriber.telegramId.asString(), "Ваш доступ к каналу окончен")
             successDeleted.add(subscriber)
-            Thread.sleep(100)
         }
+        //TODO вывести количество или список исключенных пользователей - successDeleted и удалить из таблицы пользователей
     }
 
     private fun disableSubscriber(chatId: String) {
         val subscriber = runBlocking { subscriberService.read(TelegramId(chatId)) }
-        subscriber?.apply {
-            enable = false
-        }
+        subscriber?.apply { enable = false }
 
         runBlocking {
             if (subscriber != null) {
@@ -279,18 +267,15 @@ class BotService(appSettings: AppSettings) : TelegramLongPollingBot(), Logger {
     }
 
     private fun giveRights(chatId: String) {
-        val unbanChatMember = UnbanChatMember()
-        unbanChatMember.chatId = privateChannelId
-        unbanChatMember.onlyIfBanned = false
-        unbanChatMember.userId = chatId.toLong()
+        val unbanChatMember = UnbanChatMember().apply {
+            this.chatId = privateChannelId
+            onlyIfBanned = false
+            userId = chatId.toLong()
+        }
         execute(unbanChatMember)
 
         addInfoSubscriberToDb(null, chatId, null, TypeSubscribe.FULL)
-
-        val message = SendMessage()
-        message.text = "Вам выдан полный доступ: ${getChatInviteLink()}"
-        message.chatId = chatId
-        execute(message)
+        sendMessage(chatId, "Вам выдан полный доступ: ${getChatInviteLink()}")
     }
 
     private fun getStat(): List<MonthStat> {
@@ -350,78 +335,6 @@ class BotService(appSettings: AppSettings) : TelegramLongPollingBot(), Logger {
         return inlineKeyboardMarkup
     }
 
-//    private fun register(chatId: Long) {
-//        val sendMessage: SendMessage = SendMessage(chatId.toString(), QUESTION_TEXT)
-//
-//        val markupInLine: InlineKeyboardMarkup = InlineKeyboardMarkup()
-//        val rowsInLine: MutableList<MutableList<InlineKeyboardButton>> = ArrayList()
-//
-//        val rowInLine: MutableList<InlineKeyboardButton> = ArrayList()
-//
-//        val yesBtn = InlineKeyboardButton()
-//        yesBtn.apply {
-//            text = "Yes"
-//            callbackData = YES_BUTTON // TODO константа
-//        }
-//
-//        val noBtn = InlineKeyboardButton()
-//        noBtn.apply {
-//            text = "No"
-//            callbackData = NO_BUTTON // TODO константа
-//        }
-//
-//        rowInLine.add(yesBtn)
-//        rowInLine.add(noBtn)
-//
-//        rowsInLine.add(rowInLine)
-//        markupInLine.keyboard = rowsInLine
-//        sendMessage.replyMarkup = markupInLine
-//
-//        execute(sendMessage)
-//    }
-
-//    private fun registeredUser(message: Message?) {
-//        message?.chat?.let {
-//            val chatId = it.id.toString()
-//            val user = runBlocking { userService.read(ChatId(chatId)) }
-//
-//            if (user == null) {
-//                runBlocking {
-//                    userService.create(
-//                        User(
-//                            chatId = ChatId(chatId),
-//                            firstName = it.firstName ?: "",
-//                            lastName = it.lastName ?: "",
-//                            userName = it.userName ?: "",
-//                        )
-//                    )
-//                }
-//            }
-//        }
-//    }
-
-//    private fun getAll(chatId: Long) {
-//        val messageTest = runBlocking { reminderService.getRemindersForChat(chatId) }
-//            .joinToString(prefix = "List:\n-> ", separator = "\n-> ") { it.toString() }
-//
-//        if (messageTest.isNotEmpty()) {
-//            sendMessage(messageTest, chatId)
-//        }
-//    }
-//
-//    private fun saveReminder(chatId: Long, message: String) {
-//        val reminder = parserMessageToReminder(chatId, message)
-//        runBlocking { reminderService.create(reminder) }
-//        sendMessage("Scheduled '${reminder.description}'", chatId)
-//    }
-//
-//    private fun deleteReminder(chatId: Long, message: String): Boolean {
-////        val reminder = parserMessageToReminder(chatId, message)
-//        val reminder = runBlocking { reminderService.findByChatIdAndDescriptionAndMinutesAndHours(chatId, message) }
-//        val reminderId = reminder?.id?.asString() ?: ""
-//        return runBlocking { reminderService.delete(ReminderId(reminderId)) }
-//    }
-
     private fun executeEditMessageText(messageId: Int, chatId: Long, text: String) {
         val message = EditMessageText()
         message.apply {
@@ -432,32 +345,12 @@ class BotService(appSettings: AppSettings) : TelegramLongPollingBot(), Logger {
         execute(message)
     }
 
-    private fun sendMessage(chatId: Long, message: String, keyboardMarkup: ReplyKeyboardMarkup? = null) {
-        val sendMessage = SendMessage(chatId.toString(), message)
-        sendMessage.replyMarkup = keyboardMarkup
+    private fun sendMessage(chatId: String, message: String, inlineKeyboardMarkup: InlineKeyboardMarkup? = null) {
+        val sendMessage = SendMessage(chatId, message)
+        sendMessage.enableHtml(true)
+        sendMessage.parseMode = ParseMode.MARKDOWN
+        sendMessage.replyMarkup = inlineKeyboardMarkup
         execute(sendMessage)
-    }
-
-    private fun prepareKeyboard(): ReplyKeyboardMarkup {
-        val keyboardMarkup: ReplyKeyboardMarkup = ReplyKeyboardMarkup()
-        val keyboardRows: MutableList<KeyboardRow> = ArrayList()
-
-        val row1: KeyboardRow = KeyboardRow()
-        val row2: KeyboardRow = KeyboardRow()
-
-        // #1
-        row1.add("weather")
-        row1.add("get random joke")
-        keyboardRows.add(row1)
-
-        // #2
-        row2.add("register")
-        row2.add("check my data")
-        row2.add("delete my data")
-        keyboardRows.add(row2)
-
-        keyboardMarkup.keyboard = keyboardRows
-        return keyboardMarkup
     }
 
     private fun configureMenu() {
